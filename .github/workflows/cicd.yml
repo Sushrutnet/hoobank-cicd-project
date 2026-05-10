@@ -1,0 +1,35 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker Image
+        run: docker build -t hoobank-app .
+
+      - name: Run Container
+        run: |
+          docker run -d -p 80:80 --name hoobank-container hoobank-app
+
+      - name: Verify Application
+        run: |
+          sleep 10
+          curl http://localhost
+
+      - name: Stop Container
+        run: docker stop hoobank-container
