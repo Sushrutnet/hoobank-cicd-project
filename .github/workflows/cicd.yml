@@ -7,29 +7,61 @@ on:
 
 jobs:
 
-  build:
+  build-and-deploy:
 
     runs-on: ubuntu-latest
 
     steps:
 
-      - name: Checkout Code
-        uses: actions/checkout@v4
+    - name: Checkout Code
+      uses: actions/checkout@v4
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Build Docker Image
-        run: docker build -t hoobank-app .
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Run Container
-        run: |
-          docker run -d -p 80:80 --name hoobank-container hoobank-app
+    - name: Build Docker Image
+      run: |
+        docker buildx build \
+        --platform linux/amd64 \
+        -t ${{ secrets.ECR_REPOSITORY }}:latest \
+        .
 
-      - name: Verify Application
-        run: |
-          sleep 10
-          curl http://localhost
+    - name: Tag Docker Image
+      run: |
+        docker tag ${{ secrets.ECR_REPOSITORY }}:latest \
+        565393042572.dkr.ecr.ap-south-1.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
 
-      - name: Stop Container
-        run: docker stop hoobank-container
+    - name: Push Docker Image
+      run: |
+        docker push \
+        565393042572.dkr.ecr.ap-south-1.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
+
+    - name: Deploy To EC2
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+
+        script: |
+
+          aws ecr get-login-password --region ap-south-1 | \
+          docker login --username AWS --password-stdin \
+          565393042572.dkr.ecr.ap-south-1.amazonaws.com
+
+          docker pull \
+          565393042572.dkr.ecr.ap-south-1.amazonaws.com/hoobank-app:latest
+
+          kind load docker-image \
+          565393042572.dkr.ecr.ap-south-1.amazonaws.com/hoobank-app:latest \
+          --name hoobank-cluster
+
+          kubectl rollout restart deployment hoobank-deployment
